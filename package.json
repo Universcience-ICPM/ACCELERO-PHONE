@@ -1,0 +1,24 @@
+{
+  "name": "smartphone-cubes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "build:vendor": "esbuild public/vendor/gifuct-entry.js --bundle --format=esm --platform=browser --outfile=public/vendor/gifuct.esm.js",
+    "postinstall": "npm run build:vendor",
+    "qa": "node scripts/qa-playwright.mjs"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "gifuct-js": "^2.1.2",
+    "qrcode": "^1.5.4",
+    "three": "^0.179.1",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.62.1"
+  }
+}

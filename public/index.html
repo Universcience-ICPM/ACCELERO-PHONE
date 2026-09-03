@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Smartphone Cubes</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/vendor/three/three.module.js",
+          "gifuct-js": "/vendor/gifuct.esm.js"
+        }
+      }
+    </script>
+  </head>
+  <body class="display-page">
+    <main class="display-app">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Prototype WebSocket</p>
+          <h1>Smartphones Cubes</h1>
+        </div>
+        <div id="serverStatus" class="status-pill status-waiting">Connexion serveur</div>
+      </header>
+
+      <section class="display-layout" aria-label="Affichage principal">
+        <div class="scene-panel">
+          <canvas id="sceneCanvas"></canvas>
+          <div class="scene-label scene-label-left">
+            <span>Joueur 1</span>
+            <strong id="player1MiniStatus">En attente</strong>
+          </div>
+          <div class="scene-label scene-label-right">
+            <span>Joueur 2</span>
+            <strong id="player2MiniStatus">En attente</strong>
+          </div>
+        </div>
+
+        <aside class="control-column">
+          <section class="panel qr-panel">
+            <p class="panel-kicker">Contrôleurs</p>
+            <img id="qrCode" class="qr-code" alt="QR code du contrôleur" />
+            <a id="controllerLink" class="controller-link" href="/controller">/controller</a>
+          </section>
+
+          <section class="panel players-panel">
+            <div class="player-row">
+              <span class="player-dot" id="player1Dot"></span>
+              <div>
+                <strong>Joueur 1</strong>
+                <span id="player1Status">En attente</span>
+              </div>
+            </div>
+            <div class="player-row">
+              <span class="player-dot" id="player2Dot"></span>
+              <div>
+                <strong>Joueur 2</strong>
+                <span id="player2Status">En attente</span>
+              </div>
+            </div>
+          </section>
+
+          <section id="debugPanel" class="panel debug-panel" hidden>
+            <div class="debug-grid">
+              <span>FPS</span><strong id="fpsValue">--</strong>
+              <span>P1 α β γ</span><strong id="player1Values">--</strong>
+              <span>P1 latence</span><strong id="player1Latency">--</strong>
+              <span>P2 α β γ</span><strong id="player2Values">--</strong>
+              <span>P2 latence</span><strong id="player2Latency">--</strong>
+            </div>
+          </section>
+        </aside>
+      </section>
+    </main>
+
+    <script type="module" src="/js/display.js"></script>
+  </body>
+</html>

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Contrôleur Smartphone</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body class="controller-page">
+    <main class="phone-shell">
+      <section class="controller-panel">
+        <div id="connectionPill" class="status-pill status-waiting">Connexion</div>
+        <p class="eyebrow">Contrôleur</p>
+        <h1 id="playerTitle">En attente</h1>
+        <p id="messageText" class="controller-message">
+          Touchez DÉMARRER puis autorisez l’accès aux mouvements du téléphone.
+        </p>
+
+        <div class="controller-actions">
+          <button id="startButton" class="primary-button" type="button">DÉMARRER</button>
+          <button id="recalibrateButton" class="secondary-button" type="button" disabled>
+            RECALIBRER
+          </button>
+        </div>
+
+        <div class="sensor-readout" aria-live="polite">
+          <div>
+            <span>α</span>
+            <strong id="alphaValue">0.0</strong>
+          </div>
+          <div>
+            <span>β</span>
+            <strong id="betaValue">0.0</strong>
+          </div>
+          <div>
+            <span>γ</span>
+            <strong id="gammaValue">0.0</strong>
+          </div>
+        </div>
+
+        <section id="controllerDebugPanel" class="debug-panel controller-debug" hidden>
+          <div class="debug-grid">
+            <span>WebSocket</span><strong id="debugSocket">--</strong>
+            <span>Joueur</span><strong id="debugPlayer">--</strong>
+            <span>Écran</span><strong id="debugScreen">--</strong>
+            <span>Brut α β γ</span><strong id="debugRaw">--</strong>
+            <span>Normalisé α β γ</span><strong id="debugNormalized">--</strong>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="/js/controller.js"></script>
+  </body>
+</html>
