@@ -166,6 +166,12 @@ try {
       spiderFramesAdvance:
         qaFrameProbe.spider?.renderedFrameCount > qaBefore.spider?.renderedFrameCount + 2,
       spiderBecomesVisibleUnderHalo: spiderVisibleState?.spider?.opacity > 0.55,
+      lightBeamsUseDepthTest: qaAfter.beams?.every((beam) => {
+        return (
+          beam.elements.length >= 5 &&
+          beam.elements.every((element) => element.depthTest === true && element.depthWrite === false)
+        );
+      }),
       halosAreTracked: [1, 2].every((playerId) => {
         const halo = qaAfter.halos?.[playerId];
         return Number.isFinite(halo?.x) && Number.isFinite(halo?.y) && Number.isFinite(halo?.opacity);

@@ -195,73 +195,120 @@ function createBackWall() {
 
 function createLightBeam() {
   const group = new THREE.Group();
+  const beamTexture = createBeamTexture();
 
-  const beam = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.92, 0.16, BEAM_LENGTH, 48, 1, true),
+  const sheets = [
+    createBeamSheet(beamTexture, 1, 0, 0.3),
+    createBeamSheet(beamTexture, 0, 1, 0.22),
+    createBeamSheet(beamTexture, 0.7, 0.7, 0.18),
+    createBeamSheet(beamTexture, 0.7, -0.7, 0.18)
+  ];
+
+  const sourceGlow = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.58, 0.58),
     new THREE.MeshBasicMaterial({
-      color: "#54d6ff",
+      map: createHaloTexture(),
       transparent: true,
-      opacity: 0.34,
+      opacity: 0.62,
       blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
       depthWrite: false,
-      depthTest: false
+      depthTest: true,
+      side: THREE.DoubleSide
     })
   );
-  beam.rotation.x = -Math.PI / 2;
-  beam.position.z = -CUBE_SIZE / 2 - BEAM_LENGTH / 2;
-  beam.renderOrder = 2;
+  sourceGlow.position.z = -CUBE_SIZE / 2 - 0.018;
+  sourceGlow.renderOrder = 2;
+  sourceGlow.userData.beamElement = "source-glow";
 
-  const core = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.24, 0.05, BEAM_LENGTH * 0.9, 32, 1, true),
-    new THREE.MeshBasicMaterial({
-      color: "#b9f4ff",
-      transparent: true,
-      opacity: 0.42,
-      blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-      depthTest: false
-    })
-  );
-  core.rotation.x = -Math.PI / 2;
-  core.position.z = -CUBE_SIZE / 2 - (BEAM_LENGTH * 0.9) / 2;
-  core.renderOrder = 3;
-
-  const streaks = new THREE.LineSegments(
-    createBeamStreakGeometry(),
-    new THREE.LineBasicMaterial({
-      color: "#d9fbff",
-      transparent: true,
-      opacity: 0.52,
-      blending: THREE.AdditiveBlending,
-      depthTest: false,
-      depthWrite: false
-    })
-  );
-  streaks.renderOrder = 4;
-
-  group.add(beam, core, streaks);
+  group.add(sourceGlow, ...sheets);
+  group.userData.lightBeam = true;
   return group;
 }
 
-function createBeamStreakGeometry() {
-  const nearZ = -CUBE_SIZE / 2 - 0.02;
+function createBeamSheet(texture, axisX, axisY, opacity) {
+  const nearZ = -CUBE_SIZE / 2 - 0.035;
   const farZ = -CUBE_SIZE / 2 - BEAM_LENGTH;
-  const points = [
-    new THREE.Vector3(0, 0, nearZ),
-    new THREE.Vector3(0, 0, farZ),
-    new THREE.Vector3(0, 0, nearZ),
-    new THREE.Vector3(0.52, 0.36, farZ),
-    new THREE.Vector3(0, 0, nearZ),
-    new THREE.Vector3(-0.52, 0.36, farZ),
-    new THREE.Vector3(0, 0, nearZ),
-    new THREE.Vector3(0.52, -0.36, farZ),
-    new THREE.Vector3(0, 0, nearZ),
-    new THREE.Vector3(-0.52, -0.36, farZ)
-  ];
+  const nearHalf = 0.05;
+  const farHalf = 1.06;
+  const length = Math.hypot(axisX, axisY) || 1;
+  const ux = axisX / length;
+  const uy = axisY / length;
 
-  return new THREE.BufferGeometry().setFromPoints(points);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(
+      [
+        -ux * nearHalf,
+        -uy * nearHalf,
+        nearZ,
+        ux * nearHalf,
+        uy * nearHalf,
+        nearZ,
+        -ux * farHalf,
+        -uy * farHalf,
+        farZ,
+        ux * farHalf,
+        uy * farHalf,
+        farZ
+      ],
+      3
+    )
+  );
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1], 2));
+  geometry.setIndex([0, 2, 1, 1, 2, 3]);
+  geometry.computeVertexNormals();
+
+  const sheet = new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      opacity,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      depthTest: true
+    })
+  );
+  sheet.renderOrder = 2;
+  sheet.userData.beamElement = "soft-sheet";
+  return sheet;
+}
+
+function createBeamTexture() {
+  const width = 256;
+  const height = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  const imageData = context.createImageData(width, height);
+
+  for (let y = 0; y < height; y += 1) {
+    const along = y / (height - 1);
+    const startFade = smoothstep(0, 0.18, along);
+    const endFade = 1 - smoothstep(0.62, 1, along);
+    const distanceFade = 1 - along * 0.38;
+
+    for (let x = 0; x < width; x += 1) {
+      const cross = Math.abs(x / (width - 1) - 0.5) * 2;
+      const center = Math.pow(1 - clamp(cross, 0, 1), 2.35);
+      const alpha = Math.round(255 * center * startFade * endFade * distanceFade);
+      const index = (y * width + x) * 4;
+      imageData.data[index] = 126;
+      imageData.data[index + 1] = 232;
+      imageData.data[index + 2] = 255;
+      imageData.data[index + 3] = alpha;
+    }
+  }
+
+  context.putImageData(imageData, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  return texture;
 }
 
 function createHaloMesh() {
@@ -671,8 +718,32 @@ function publishQaState() {
       }
     },
     halos: state.lightSpots,
+    beams: getBeamQaState(),
     spider: state.spiderDebug
   };
+}
+
+function getBeamQaState() {
+  return [1, 2].map((playerId) => {
+    const elements = [];
+    cubes[playerId].traverse((object) => {
+      if (!object.userData.beamElement || !object.material) {
+        return;
+      }
+
+      elements.push({
+        type: object.userData.beamElement,
+        depthTest: object.material.depthTest,
+        depthWrite: object.material.depthWrite,
+        opacity: object.material.opacity
+      });
+    });
+
+    return {
+      playerId,
+      elements
+    };
+  });
 }
 
 function makePlayerState() {
