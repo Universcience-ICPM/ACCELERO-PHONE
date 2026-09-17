@@ -55,8 +55,16 @@ try {
     .catch(() => {});
   await wait(700);
 
+  const controllerCount = 10;
+  const controllers = [];
+  for (let index = 0; index < controllerCount; index += 1) {
+    controllers.push(await joinController());
+  }
+  await wait(900);
+
   const desktopBefore = await canvasStats(display);
   const qaBefore = await readQaState(display);
+  const testedPlayerId = controllers[0].playerId;
   await display.screenshot({
     path: path.join(outputDir, "display-desktop.png"),
     fullPage: true
@@ -79,9 +87,7 @@ try {
     })
     .catch(() => {});
 
-  const controller = await joinController();
-  const testedPlayerId = controller.playerId;
-  controller.ws.send(
+  controllers[0].ws.send(
     JSON.stringify({
       type: "orientation",
       playerId: testedPlayerId,
@@ -99,7 +105,6 @@ try {
     path: path.join(outputDir, "display-desktop-oriented.png"),
     fullPage: true
   });
-  controller.ws.close();
 
   await display.setViewportSize({ width: 390, height: 844 });
   await display.goto(`${baseUrl}/?debug=1`, { waitUntil: "networkidle" });
@@ -111,10 +116,38 @@ try {
     fullPage: true
   });
 
+  for (const controller of controllers) {
+    controller.ws.close();
+  }
+  await wait(300);
+
   const phone = await context.newPage();
+  await phone.addInitScript(() => {
+    window.__vibrateCalls = [];
+    Object.defineProperty(navigator, "vibrate", {
+      configurable: true,
+      value: (pattern) => {
+        window.__vibrateCalls.push(Array.isArray(pattern) ? [...pattern] : pattern);
+        return true;
+      }
+    });
+  });
   await phone.setViewportSize({ width: 390, height: 844 });
   await phone.goto(`${baseUrl}/controller?debug=1`, { waitUntil: "networkidle" });
   await wait(700);
+  await phone
+    .waitForFunction(() => window.__SMARTPHONE_CUBES_CONTROLLER_QA__?.playerId, null, {
+      timeout: 3000
+    })
+    .catch(() => {});
+
+  const controllerQaBeforeHaptic = await readControllerQaState(phone);
+  const manualVibrationProbe = await probeManualVibration(phone);
+  const hapticProbe = await probeControllerHaptic({
+    baseUrl,
+    phone,
+    playerId: controllerQaBeforeHaptic.playerId
+  });
 
   const controllerLayout = await phone.evaluate(() => {
     const panel = document.querySelector(".controller-panel").getBoundingClientRect();
@@ -159,6 +192,9 @@ try {
     checks: {
       desktopCanvasHasColor: desktopBefore.colored > 20,
       mobileCanvasHasColor: mobileDisplay.colored > 20,
+      multiControllerCubesCreated: qaBefore.connectedPlayerIds?.length >= controllerCount,
+      cubeScaleAdaptsToPlayerCount:
+        qaBefore.layout?.count >= controllerCount && qaBefore.layout?.cubeScale < 1,
       spiderGifLoads:
         spiderGifResponse.ok && (spiderGifResponse.contentType || "").includes("image/gif"),
       spiderTextureLoaded: qaBefore.spider?.textureLoaded === true,
@@ -172,10 +208,12 @@ try {
           beam.elements.every((element) => element.depthTest === true && element.depthWrite === false)
         );
       }),
-      halosAreTracked: [1, 2].every((playerId) => {
+      halosAreTracked: qaAfter.connectedPlayerIds?.every((playerId) => {
         const halo = qaAfter.halos?.[playerId];
         return Number.isFinite(halo?.x) && Number.isFinite(halo?.y) && Number.isFinite(halo?.opacity);
       }),
+      hapticIntensityIsStrong:
+        qaBefore.haptics?.intensity === 5 && vibrationTotal(qaBefore.haptics?.pattern) > 900,
       cubeMovedAfterOrientation: rotationDistance(
         qaBefore.cubeRotations?.[testedPlayerId],
         qaAfter.cubeRotations?.[testedPlayerId]
@@ -187,6 +225,11 @@ try {
       controllerFitsMobile:
         controllerLayout.panel.top >= 0 &&
         controllerLayout.panel.bottom <= controllerLayout.viewport.height + 2,
+      controllerTestButtonVibrates: manualVibrationProbe.vibrated,
+      controllerTestButtonPlaysSound: manualVibrationProbe.soundPlayed,
+      controllerVibratesOnHaptic: hapticProbe.vibrated,
+      controllerPlaysSoundOnHaptic: hapticProbe.soundPlayed,
+      controllerShowsImpactFeedback: hapticProbe.impactFeedback,
       browserErrors
     },
     canvas: {
@@ -197,10 +240,15 @@ try {
     qa: {
       spiderGifResponse,
       testedPlayerId,
+      controllerCount,
+      assignedPlayerIds: controllers.map((controller) => controller.playerId),
       before: qaBefore,
       frameProbe: qaFrameProbe,
       spiderVisible: spiderVisibleState,
-      after: qaAfter
+      after: qaAfter,
+      controllerQaBeforeHaptic,
+      manualVibrationProbe,
+      hapticProbe
     },
     controllerLayout
   };
@@ -253,6 +301,106 @@ function joinController() {
 
     ws.on("error", reject);
   });
+}
+
+function joinDisplaySocket() {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(baseUrl.replace(/^https:/, "wss:").replace(/^http:/, "ws:"), {
+      rejectUnauthorized: false
+    });
+    const timer = setTimeout(() => reject(new Error("display timeout")), 3000);
+
+    ws.on("open", () => {
+      ws.send(
+        JSON.stringify({
+          type: "join",
+          client: "display"
+        })
+      );
+    });
+
+    ws.on("message", (data) => {
+      const message = JSON.parse(data.toString());
+      if (message.type === "state") {
+        clearTimeout(timer);
+        resolve(ws);
+      }
+    });
+
+    ws.on("error", reject);
+  });
+}
+
+async function probeControllerHaptic({ phone, playerId }) {
+  const numericPlayerId = Number(playerId);
+  if (!Number.isFinite(numericPlayerId)) {
+    return { ok: false, playerId, calls: [], controllerQa: null };
+  }
+
+  const initialCallCount = await phone.evaluate(() => window.__vibrateCalls?.length || 0);
+  const initialQa = await readControllerQaState(phone);
+  const initialToneAt = initialQa?.lastToneAt || 0;
+  const displaySocket = await joinDisplaySocket();
+  displaySocket.send(
+    JSON.stringify({
+      type: "haptic",
+      playerId: numericPlayerId,
+      pattern: [12, 8, 16],
+      reason: "qa-haptic-probe",
+      timestamp: Date.now()
+    })
+  );
+
+  await phone
+    .waitForFunction((count) => window.__vibrateCalls?.length > count, initialCallCount, {
+      timeout: 1500
+    })
+    .catch(() => {});
+  await wait(180);
+
+  const calls = await phone.evaluate(() => window.__vibrateCalls || []);
+  const latestCall = calls.at(-1);
+  const controllerQa = await readControllerQaState(phone);
+  displaySocket.close();
+
+  return {
+    vibrated:
+      Array.isArray(latestCall) &&
+      latestCall.join(",") === "12,8,16" &&
+      Number.isFinite(controllerQa?.lastHapticAt),
+    soundPlayed: Number.isFinite(controllerQa?.lastToneAt) && controllerQa.lastToneAt > initialToneAt,
+    impactFeedback: Number.isFinite(controllerQa?.lastImpactAt),
+    playerId: numericPlayerId,
+    calls,
+    controllerQa
+  };
+}
+
+async function probeManualVibration(phone) {
+  const initialCallCount = await phone.evaluate(() => window.__vibrateCalls?.length || 0);
+  const initialQa = await readControllerQaState(phone);
+  const initialToneAt = initialQa?.lastToneAt || 0;
+  await phone.click("#vibrationTestButton");
+  await phone
+    .waitForFunction((count) => window.__vibrateCalls?.length > count, initialCallCount, {
+      timeout: 1500
+    })
+    .catch(() => {});
+  await wait(180);
+
+  const calls = await phone.evaluate(() => window.__vibrateCalls || []);
+  const latestCall = calls.at(-1);
+  const controllerQa = await readControllerQaState(phone);
+
+  return {
+    vibrated:
+      Array.isArray(latestCall) &&
+      latestCall.join(",") === "175,28,254,28,333,28,210" &&
+      controllerQa?.lastVibrateResult === true,
+    soundPlayed: Number.isFinite(controllerQa?.lastToneAt) && controllerQa.lastToneAt > initialToneAt,
+    calls,
+    controllerQa
+  };
 }
 
 async function canvasStats(page) {
@@ -319,12 +467,24 @@ async function readQaState(page) {
   return await page.evaluate(() => window.__SMARTPHONE_CUBES_QA__ || {});
 }
 
+async function readControllerQaState(page) {
+  return await page.evaluate(() => window.__SMARTPHONE_CUBES_CONTROLLER_QA__ || {});
+}
+
 function rotationDistance(before, after) {
   if (!before || !after) {
     return 0;
   }
 
   return Math.hypot(after.x - before.x, after.y - before.y, after.z - before.z);
+}
+
+function vibrationTotal(pattern) {
+  if (!Array.isArray(pattern)) {
+    return 0;
+  }
+
+  return pattern.reduce((sum, duration) => sum + Number(duration || 0), 0);
 }
 
 function boxesOverlap(a, b) {

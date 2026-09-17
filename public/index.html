@@ -27,13 +27,9 @@
       <section class="display-layout" aria-label="Affichage principal">
         <div class="scene-panel">
           <canvas id="sceneCanvas"></canvas>
-          <div class="scene-label scene-label-left">
-            <span>Joueur 1</span>
-            <strong id="player1MiniStatus">En attente</strong>
-          </div>
-          <div class="scene-label scene-label-right">
-            <span>Joueur 2</span>
-            <strong id="player2MiniStatus">En attente</strong>
+          <div class="scene-label scene-count">
+            <span>Smartphones</span>
+            <strong id="scenePlayerCount">0 connecté</strong>
           </div>
         </div>
 
@@ -45,30 +41,19 @@
           </section>
 
           <section class="panel players-panel">
-            <div class="player-row">
-              <span class="player-dot" id="player1Dot"></span>
-              <div>
-                <strong>Joueur 1</strong>
-                <span id="player1Status">En attente</span>
-              </div>
+            <div>
+              <p class="panel-kicker">Présences</p>
+              <strong id="connectedCount">0 smartphone connecté</strong>
             </div>
-            <div class="player-row">
-              <span class="player-dot" id="player2Dot"></span>
-              <div>
-                <strong>Joueur 2</strong>
-                <span id="player2Status">En attente</span>
-              </div>
-            </div>
+            <div id="playersList" class="players-list"></div>
           </section>
 
           <section id="debugPanel" class="panel debug-panel" hidden>
             <div class="debug-grid">
               <span>FPS</span><strong id="fpsValue">--</strong>
-              <span>P1 α β γ</span><strong id="player1Values">--</strong>
-              <span>P1 latence</span><strong id="player1Latency">--</strong>
-              <span>P2 α β γ</span><strong id="player2Values">--</strong>
-              <span>P2 latence</span><strong id="player2Latency">--</strong>
+              <span>Cubes</span><strong id="debugCubeLayout">--</strong>
             </div>
+            <div id="debugPlayersList" class="debug-list"></div>
           </section>
         </aside>
       </section>

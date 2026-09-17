@@ -1,10 +1,14 @@
 import * as THREE from "three";
 import { decompressFrames, parseGIF } from "gifuct-js";
 
-const DEBUG = new URLSearchParams(window.location.search).get("debug") === "1";
+const params = new URLSearchParams(window.location.search);
+const DEBUG = params.get("debug") === "1";
 const DEG_TO_RAD = Math.PI / 180;
 const ROTATION_LERP = 0.18;
 const CUBE_SIZE = 1.35;
+const CUBE_GAP_X = 0.5;
+const CUBE_GAP_Y = 0.36;
+const MIN_CUBE_SCALE = 0.12;
 const BEAM_LENGTH = 2.65;
 const WALL = {
   z: -3.05,
@@ -14,6 +18,11 @@ const WALL = {
 };
 const HALO_RADIUS = 1.55;
 const SPIDER_SIZE = 0.74;
+const SPIDER_AXIS_HIT_RADIUS = SPIDER_SIZE * 0.35;
+const DEFAULT_HAPTIC_INTENSITY = 5;
+const HAPTIC_INTENSITY = readHapticIntensity();
+const HAPTIC_COOLDOWN_MS = 1800;
+const SPIDER_HIT_PATTERN = makeImpactVibrationPattern(HAPTIC_INTENSITY);
 
 const refs = {
   canvas: document.querySelector("#sceneCanvas"),
@@ -22,28 +31,25 @@ const refs = {
   controllerLink: document.querySelector("#controllerLink"),
   debugPanel: document.querySelector("#debugPanel"),
   fpsValue: document.querySelector("#fpsValue"),
-  player1Dot: document.querySelector("#player1Dot"),
-  player2Dot: document.querySelector("#player2Dot"),
-  player1Status: document.querySelector("#player1Status"),
-  player2Status: document.querySelector("#player2Status"),
-  player1MiniStatus: document.querySelector("#player1MiniStatus"),
-  player2MiniStatus: document.querySelector("#player2MiniStatus"),
-  player1Values: document.querySelector("#player1Values"),
-  player2Values: document.querySelector("#player2Values"),
-  player1Latency: document.querySelector("#player1Latency"),
-  player2Latency: document.querySelector("#player2Latency")
+  scenePlayerCount: document.querySelector("#scenePlayerCount"),
+  connectedCount: document.querySelector("#connectedCount"),
+  playersList: document.querySelector("#playersList"),
+  debugCubeLayout: document.querySelector("#debugCubeLayout"),
+  debugPlayersList: document.querySelector("#debugPlayersList")
 };
 
 const state = {
   ws: null,
   reconnectTimer: null,
-  players: {
-    1: makePlayerState(),
-    2: makePlayerState()
-  },
-  lightSpots: {
-    1: { x: -1.55, y: 0, opacity: 0.8 },
-    2: { x: 1.55, y: 0, opacity: 0.8 }
+  players: new Map(),
+  lightSpots: new Map(),
+  haptics: new Map(),
+  layout: {
+    count: 0,
+    columns: 0,
+    rows: 0,
+    cubeScale: 1,
+    narrow: false
   },
   spiderDebug: null,
   frameCount: 0,
@@ -93,28 +99,26 @@ floor.position.y = -1.1;
 floor.receiveShadow = true;
 scene.add(floor);
 
-const haloMeshes = {
-  1: createHaloMesh(),
-  2: createHaloMesh()
-};
-scene.add(haloMeshes[1], haloMeshes[2]);
+const haloGroup = new THREE.Group();
+scene.add(haloGroup);
 
 const spider = createSpider();
 scene.add(spider.mesh);
 
-const cubes = {
-  1: createCube(-1.55),
-  2: createCube(1.55)
-};
-scene.add(cubes[1], cubes[2]);
+const cubeGroup = new THREE.Group();
+const cubes = new Map();
+const haloMeshes = new Map();
+scene.add(cubeGroup);
 
 window.addEventListener("resize", resizeScene);
+const sceneResizeObserver = new ResizeObserver(resizeScene);
+sceneResizeObserver.observe(refs.canvas.parentElement);
 resizeScene();
 loadConfig();
 connectWebSocket();
 requestAnimationFrame(animate);
 
-function createCube(x) {
+function createCube(playerId) {
   const geometry = new THREE.BoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
   const materials = [
     new THREE.MeshStandardMaterial({ color: "#ffd447", roughness: 0.42 }),
@@ -144,7 +148,7 @@ function createCube(x) {
   );
 
   const group = new THREE.Group();
-  group.position.x = x;
+  group.userData.playerId = playerId;
   group.add(createLightBeam(), mesh, edges);
   return group;
 }
@@ -517,11 +521,12 @@ function handleServerMessage(message) {
   }
 
   if (message.type === "orientation") {
-    const player = state.players[message.playerId];
-    if (!player) {
+    const playerId = Number(message.playerId);
+    if (!Number.isFinite(playerId)) {
       return;
     }
 
+    const player = ensurePlayerVisual(playerId);
     player.connected = true;
     player.lastMessageAt = performance.now();
     player.values = {
@@ -541,29 +546,36 @@ function handleServerMessage(message) {
 }
 
 function applyPlayers(players = []) {
+  const connectedIds = new Set();
+
   for (const playerInfo of players) {
-    const player = state.players[playerInfo.playerId];
-    if (!player) {
+    const playerId = Number(playerInfo.playerId);
+    if (!Number.isFinite(playerId) || !playerInfo.connected) {
       continue;
     }
+
+    const player = ensurePlayerVisual(playerId);
     player.connected = Boolean(playerInfo.connected);
-    if (!player.connected) {
-      player.target = new THREE.Euler(0, 0, 0, "YXZ");
+    connectedIds.add(playerId);
+  }
+
+  for (const playerId of [...state.players.keys()]) {
+    if (!connectedIds.has(playerId)) {
+      removePlayerVisual(playerId);
     }
   }
+
+  layoutCubes();
   paintPlayers();
+  paintDebug();
 }
 
 function animate(now) {
   requestAnimationFrame(animate);
 
-  for (const playerId of [1, 2]) {
-    const player = state.players[playerId];
-    const cube = cubes[playerId];
-
-    if (!player.connected) {
-      player.target.set(0, 0, 0, "YXZ");
-    }
+  for (const playerId of getConnectedPlayerIds()) {
+    const player = state.players.get(playerId);
+    const cube = cubes.get(playerId);
 
     cube.rotation.x = lerp(cube.rotation.x, player.target.x, ROTATION_LERP);
     cube.rotation.y = lerpAngle(cube.rotation.y, player.target.y, ROTATION_LERP);
@@ -583,14 +595,16 @@ function resizeScene() {
   const height = Math.max(1, parent.clientHeight);
   const narrow = width < 620 || width / height < 0.85;
 
-  cubes[1].position.x = narrow ? -1.1 : -1.55;
-  cubes[2].position.x = narrow ? 1.1 : 1.55;
-  camera.position.set(0, narrow ? 2.35 : 2.2, narrow ? 7.4 : 6.2);
-  camera.lookAt(0, 0.05, 0);
-
   renderer.setSize(width, height, false);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
+
+  state.layout.narrow = narrow;
+  layoutCubes();
+
+  const rowDepth = Math.max(0, state.layout.rows - 1);
+  camera.position.set(0, narrow ? 2.35 + rowDepth * 0.14 : 2.2 + rowDepth * 0.1, narrow ? 7.4 : 6.2);
+  camera.lookAt(0, 0.05, 0);
 }
 
 async function loadConfig() {
@@ -610,13 +624,18 @@ function phoneOrientationToThree(alpha, beta, gamma) {
 }
 
 function updateHalos() {
-  for (const playerId of [1, 2]) {
-    const spot = getWallLightSpot(cubes[playerId]);
-    const halo = haloMeshes[playerId];
+  for (const playerId of getConnectedPlayerIds()) {
+    const cube = cubes.get(playerId);
+    const halo = haloMeshes.get(playerId);
+    if (!cube || !halo) {
+      continue;
+    }
+
+    const spot = getWallLightSpot(cube);
     halo.position.set(spot.x, spot.y, WALL.z + 0.025);
     halo.scale.setScalar(spot.scale);
     halo.material.opacity = spot.opacity;
-    state.lightSpots[playerId] = spot;
+    state.lightSpots.set(playerId, spot);
   }
 }
 
@@ -626,9 +645,16 @@ function getWallLightSpot(cube) {
   const origin = new THREE.Vector3(0, 0, -CUBE_SIZE / 2).applyMatrix4(cube.matrixWorld);
   const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(cube.quaternion).normalize();
   const denominator = direction.z;
+  const xMin = -WALL.width / 2;
+  const xMax = WALL.width / 2;
+  const yMin = WALL.centerY - WALL.height / 2;
+  const yMax = WALL.centerY + WALL.height / 2;
 
   let x = cube.position.x;
   let y = cube.position.y;
+  let axisX = x;
+  let axisY = y;
+  let axisHitsWall = false;
   let opacity = 0.18;
   let scale = 0.82;
 
@@ -638,6 +664,9 @@ function getWallLightSpot(cube) {
       const hit = origin.clone().addScaledVector(direction, distance);
       x = hit.x;
       y = hit.y;
+      axisX = hit.x;
+      axisY = hit.y;
+      axisHitsWall = hit.x >= xMin && hit.x <= xMax && hit.y >= yMin && hit.y <= yMax;
       opacity = clamp((Math.abs(denominator) - 0.08) / 0.72, 0.2, 0.86);
       scale = clamp(0.92 + distance * 0.06, 0.88, 1.28);
     }
@@ -645,8 +674,11 @@ function getWallLightSpot(cube) {
 
   const margin = HALO_RADIUS * 0.62;
   return {
-    x: clamp(x, -WALL.width / 2 + margin, WALL.width / 2 - margin),
-    y: clamp(y, WALL.centerY - WALL.height / 2 + margin, WALL.centerY + WALL.height / 2 - margin),
+    x: clamp(x, xMin + margin, xMax - margin),
+    y: clamp(y, yMin + margin, yMax - margin),
+    axisX,
+    axisY,
+    axisHitsWall,
     opacity,
     scale
   };
@@ -666,16 +698,61 @@ function updateSpider(now) {
   spider.mesh.visible = haloVisibility > 0.025;
 
   spider.gif.update(now);
+  const axisHits = updateSpiderAxisHaptics(position, now);
 
   state.spiderDebug = {
     x: position.x,
     y: position.y,
     opacity: haloVisibility,
+    axisHits,
     textureLoaded: spider.gif.loaded,
     frameCount: spider.gif.frameCount,
     frameIndex: spider.gif.frameIndex,
     renderedFrameCount: spider.gif.renderedFrameCount
   };
+}
+
+function updateSpiderAxisHaptics(spiderPosition, now) {
+  const axisHits = {};
+
+  for (const playerId of getConnectedPlayerIds()) {
+    const player = state.players.get(playerId);
+    const spot = state.lightSpots.get(playerId);
+    const haptic = state.haptics.get(playerId);
+    if (!player || !spot || !haptic) {
+      continue;
+    }
+
+    const distance = Math.hypot(spiderPosition.x - spot.axisX, spiderPosition.y - spot.axisY);
+    const axisHit =
+      player.connected &&
+      spot.axisHitsWall &&
+      spot.opacity > 0.24 &&
+      distance <= SPIDER_AXIS_HIT_RADIUS;
+
+    if (axisHit && (!haptic.axisHit || now - haptic.lastSentAt >= HAPTIC_COOLDOWN_MS)) {
+      haptic.lastSentAt = now;
+      send({
+        type: "haptic",
+        playerId,
+        pattern: SPIDER_HIT_PATTERN,
+        reason: "spider-axis-hit",
+        distance: round(distance),
+        timestamp: Date.now()
+      });
+    }
+
+    haptic.axisHit = axisHit;
+    haptic.distance = distance;
+    axisHits[playerId] = {
+      colliding: axisHit,
+      distance: round(distance),
+      radius: round(SPIDER_AXIS_HIT_RADIUS),
+      lastSentAt: round(haptic.lastSentAt)
+    };
+  }
+
+  return axisHits;
 }
 
 function getSpiderWallPosition(seconds) {
@@ -690,13 +767,17 @@ function getSpiderWallPosition(seconds) {
 }
 
 function getSpiderHaloVisibility(position) {
-  const coverages = [1, 2].map((playerId) => {
-    const spot = state.lightSpots[playerId];
+  const coverages = getConnectedPlayerIds().map((playerId) => {
+    const spot = state.lightSpots.get(playerId);
+    if (!spot) {
+      return 0;
+    }
+
     const distance = Math.hypot(position.x - spot.x, position.y - spot.y);
     return smoothstep(HALO_RADIUS * spot.scale, HALO_RADIUS * 0.34, distance) * spot.opacity;
   });
 
-  return clamp(Math.max(...coverages) * 1.18, 0, 0.96);
+  return clamp((coverages.length ? Math.max(...coverages) : 0) * 1.18, 0, 0.96);
 }
 
 function publishQaState() {
@@ -704,29 +785,39 @@ function publishQaState() {
     return;
   }
 
+  const cubeRotations = {};
+  for (const playerId of getConnectedPlayerIds()) {
+    const cube = cubes.get(playerId);
+    cubeRotations[playerId] = {
+      x: cube.rotation.x,
+      y: cube.rotation.y,
+      z: cube.rotation.z,
+      scale: cube.scale.x
+    };
+  }
+
   window.__SMARTPHONE_CUBES_QA__ = {
-    cubeRotations: {
-      1: {
-        x: cubes[1].rotation.x,
-        y: cubes[1].rotation.y,
-        z: cubes[1].rotation.z
-      },
-      2: {
-        x: cubes[2].rotation.x,
-        y: cubes[2].rotation.y,
-        z: cubes[2].rotation.z
-      }
+    players: getConnectedPlayerIds().map((playerId) => ({
+      playerId,
+      connected: state.players.get(playerId)?.connected === true
+    })),
+    connectedPlayerIds: getConnectedPlayerIds(),
+    layout: state.layout,
+    cubeRotations,
+    halos: mapToObject(state.lightSpots),
+    haptics: {
+      intensity: HAPTIC_INTENSITY,
+      pattern: SPIDER_HIT_PATTERN
     },
-    halos: state.lightSpots,
     beams: getBeamQaState(),
     spider: state.spiderDebug
   };
 }
 
 function getBeamQaState() {
-  return [1, 2].map((playerId) => {
+  return getConnectedPlayerIds().map((playerId) => {
     const elements = [];
-    cubes[playerId].traverse((object) => {
+    cubes.get(playerId)?.traverse((object) => {
       if (!object.userData.beamElement || !object.material) {
         return;
       }
@@ -756,13 +847,203 @@ function makePlayerState() {
   };
 }
 
+function ensurePlayerVisual(playerId) {
+  if (!state.players.has(playerId)) {
+    state.players.set(playerId, makePlayerState());
+  }
+
+  if (!cubes.has(playerId)) {
+    const cube = createCube(playerId);
+    cubes.set(playerId, cube);
+    cubeGroup.add(cube);
+  }
+
+  if (!haloMeshes.has(playerId)) {
+    const halo = createHaloMesh();
+    haloMeshes.set(playerId, halo);
+    haloGroup.add(halo);
+  }
+
+  if (!state.lightSpots.has(playerId)) {
+    state.lightSpots.set(playerId, {
+      x: 0,
+      y: 0,
+      axisX: 0,
+      axisY: 0,
+      axisHitsWall: false,
+      opacity: 0,
+      scale: 1
+    });
+  }
+
+  if (!state.haptics.has(playerId)) {
+    state.haptics.set(playerId, {
+      axisHit: false,
+      distance: Infinity,
+      lastSentAt: 0
+    });
+  }
+
+  return state.players.get(playerId);
+}
+
+function removePlayerVisual(playerId) {
+  const cube = cubes.get(playerId);
+  if (cube) {
+    cubeGroup.remove(cube);
+    disposeObject(cube);
+    cubes.delete(playerId);
+  }
+
+  const halo = haloMeshes.get(playerId);
+  if (halo) {
+    haloGroup.remove(halo);
+    disposeObject(halo);
+    haloMeshes.delete(playerId);
+  }
+
+  state.players.delete(playerId);
+  state.lightSpots.delete(playerId);
+  state.haptics.delete(playerId);
+}
+
+function layoutCubes() {
+  const playerIds = getConnectedPlayerIds();
+  const count = playerIds.length;
+  const layout = calculateBestCubeLayout(count);
+  const { columns, rows, cubeScale } = layout;
+  const stepX = (CUBE_SIZE + CUBE_GAP_X) * cubeScale;
+  const stepY = (CUBE_SIZE + CUBE_GAP_Y) * cubeScale;
+
+  playerIds.forEach((playerId, index) => {
+    const cube = cubes.get(playerId);
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = (column - (columns - 1) / 2) * stepX;
+    const y = ((rows - 1) / 2 - row) * stepY * 0.78;
+
+    cube.position.set(x, y, 0);
+    cube.scale.setScalar(cubeScale);
+  });
+
+  state.layout = {
+    ...state.layout,
+    count,
+    columns,
+    rows,
+    cubeScale
+  };
+}
+
+function calculateCubeScale(columns, rows) {
+  return clamp(calculateRawCubeScale(columns, rows), MIN_CUBE_SCALE, 1);
+}
+
+function calculateBestCubeLayout(count) {
+  if (count === 0) {
+    return {
+      columns: 0,
+      rows: 0,
+      cubeScale: 1
+    };
+  }
+
+  const { width, height } = getCubeLayoutBounds();
+  const targetRatio = width / height;
+  let best = null;
+
+  for (let columns = 1; columns <= count; columns += 1) {
+    const rows = Math.ceil(count / columns);
+    const rawScale = calculateRawCubeScale(columns, rows);
+    const ratio = columns / rows;
+    const ratioDistance = Math.abs(Math.log(ratio / targetRatio));
+    const candidate = {
+      columns,
+      rows,
+      rawScale,
+      ratioDistance
+    };
+
+    if (
+      !best ||
+      candidate.rawScale > best.rawScale + 0.001 ||
+      (Math.abs(candidate.rawScale - best.rawScale) <= 0.001 &&
+        candidate.ratioDistance < best.ratioDistance)
+    ) {
+      best = candidate;
+    }
+  }
+
+  return {
+    columns: best.columns,
+    rows: best.rows,
+    cubeScale: clamp(best.rawScale, MIN_CUBE_SCALE, 1)
+  };
+}
+
+function calculateRawCubeScale(columns, rows) {
+  if (columns === 0 || rows === 0) {
+    return 1;
+  }
+
+  const { width: availableWidth, height: availableHeight } = getCubeLayoutBounds();
+  const widthNeeded = columns * CUBE_SIZE + Math.max(0, columns - 1) * CUBE_GAP_X;
+  const heightNeeded = rows * CUBE_SIZE + Math.max(0, rows - 1) * CUBE_GAP_Y;
+
+  return Math.min(1, availableWidth / widthNeeded, availableHeight / heightNeeded);
+}
+
+function getCubeLayoutBounds() {
+  return {
+    width: state.layout.narrow ? 4.4 : 7.6,
+    height: state.layout.narrow ? 3.25 : 3.15
+  };
+}
+
+function getConnectedPlayerIds() {
+  return [...state.players.entries()]
+    .filter(([, player]) => player.connected)
+    .map(([playerId]) => playerId)
+    .sort((playerA, playerB) => playerA - playerB);
+}
+
+function formatPlayerCount(count) {
+  return `${count} smartphone${count > 1 ? "s" : ""} connecté${count > 1 ? "s" : ""}`;
+}
+
 function paintPlayers() {
-  for (const playerId of [1, 2]) {
-    const player = state.players[playerId];
-    const connected = player.connected;
-    refs[`player${playerId}Dot`].classList.toggle("connected", connected);
-    refs[`player${playerId}Status`].textContent = connected ? "Connecté" : "En attente";
-    refs[`player${playerId}MiniStatus`].textContent = connected ? "Connecté" : "En attente";
+  const playerIds = getConnectedPlayerIds();
+  const countLabel = formatPlayerCount(playerIds.length);
+
+  refs.scenePlayerCount.textContent = countLabel;
+  refs.connectedCount.textContent = countLabel;
+  refs.playersList.replaceChildren();
+
+  if (playerIds.length === 0) {
+    const emptyRow = document.createElement("div");
+    emptyRow.className = "player-row";
+    emptyRow.innerHTML = `
+      <span class="player-dot"></span>
+      <div>
+        <strong>En attente</strong>
+        <span>Scannez le QR code</span>
+      </div>
+    `;
+    refs.playersList.append(emptyRow);
+    return;
+  }
+
+  for (const playerId of playerIds) {
+    const row = document.createElement("div");
+    row.className = "player-row";
+    row.innerHTML = `
+      <span class="player-dot connected"></span>
+      <div>
+        <strong>Smartphone ${playerId}</strong>
+        <span>Connecté</span>
+      </div>
+    `;
+    refs.playersList.append(row);
   }
 }
 
@@ -771,14 +1052,20 @@ function paintDebug() {
     return;
   }
 
-  for (const playerId of [1, 2]) {
-    const player = state.players[playerId];
-    refs[`player${playerId}Values`].textContent = player.values
+  refs.debugCubeLayout.textContent =
+    `${state.layout.count} cubes · ${state.layout.columns}x${state.layout.rows} · échelle ${state.layout.cubeScale.toFixed(2)}`;
+  refs.debugPlayersList.replaceChildren();
+
+  for (const playerId of getConnectedPlayerIds()) {
+    const player = state.players.get(playerId);
+    const row = document.createElement("div");
+    row.className = "debug-player";
+    const values = player.values
       ? `${formatNumber(player.values.alpha)} ${formatNumber(player.values.beta)} ${formatNumber(player.values.gamma)}`
       : "--";
-    refs[`player${playerId}Latency`].textContent = Number.isFinite(player.latency)
-      ? `${Math.round(player.latency)} ms`
-      : "--";
+    const latency = Number.isFinite(player.latency) ? `${Math.round(player.latency)} ms` : "--";
+    row.textContent = `S${playerId} · α β γ ${values} · ${latency}`;
+    refs.debugPlayersList.append(row);
   }
 }
 
@@ -804,6 +1091,25 @@ function setServerStatus(label, kind) {
   }`;
 }
 
+function readHapticIntensity() {
+  if (!params.has("hapticIntensity")) {
+    return DEFAULT_HAPTIC_INTENSITY;
+  }
+
+  const requested = Number(params.get("hapticIntensity"));
+  return Number.isFinite(requested) ? clamp(requested, 1, 5) : DEFAULT_HAPTIC_INTENSITY;
+}
+
+function makeImpactVibrationPattern(intensity) {
+  const level = clamp(Math.round(intensity), 1, 5);
+  const pulse = 35 + level * 28;
+  const pause = Math.max(24, 58 - level * 6);
+
+  return [pulse, pause, pulse * 1.45, pause, pulse * 1.9, pause, pulse * 1.2].map((duration) =>
+    Math.round(duration)
+  );
+}
+
 function send(payload) {
   if (state.ws?.readyState === WebSocket.OPEN) {
     state.ws.send(JSON.stringify(payload));
@@ -819,6 +1125,26 @@ function scheduleReconnect() {
     state.reconnectTimer = null;
     connectWebSocket();
   }, 1000);
+}
+
+function disposeObject(root) {
+  root.traverse((object) => {
+    object.geometry?.dispose?.();
+
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) {
+      if (!material) {
+        continue;
+      }
+
+      material.map?.dispose?.();
+      material.dispose?.();
+    }
+  });
+}
+
+function mapToObject(map) {
+  return Object.fromEntries(map.entries());
 }
 
 function lerp(from, to, amount) {
@@ -841,4 +1167,8 @@ function clamp(value, min, max) {
 
 function formatNumber(value) {
   return Number.isFinite(value) ? value.toFixed(1) : "--";
+}
+
+function round(value) {
+  return Math.round(value * 1000) / 1000;
 }

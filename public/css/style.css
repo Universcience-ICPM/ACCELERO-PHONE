@@ -138,6 +138,10 @@ h1 {
   left: 18px;
 }
 
+.scene-count {
+  left: 18px;
+}
+
 .scene-label-right {
   right: 18px;
   text-align: right;
@@ -202,6 +206,13 @@ h1 {
   gap: 12px;
 }
 
+.players-list {
+  max-height: 42vh;
+  display: grid;
+  gap: 8px;
+  overflow: auto;
+}
+
 .player-row {
   display: grid;
   grid-template-columns: 16px 1fr;
@@ -258,6 +269,21 @@ h1 {
 .debug-grid strong {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.debug-list {
+  margin-top: 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.debug-player {
+  padding: 8px;
+  border: 1px solid var(--line-dark);
+  border-radius: 8px;
+  color: #59605b;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .controller-page {
@@ -374,6 +400,70 @@ h1 {
   padding: 12px;
 }
 
+.orientation-notice {
+  position: fixed;
+  inset: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+    max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  z-index: 20;
+  display: grid;
+  place-content: center;
+  gap: 12px;
+  padding: 28px;
+  border-radius: 8px;
+  background: rgba(16, 18, 20, 0.96);
+  color: var(--ink);
+  text-align: center;
+}
+
+.orientation-notice[hidden] {
+  display: none;
+}
+
+.orientation-notice h2 {
+  margin: 0;
+  font-size: clamp(2rem, 9vw, 3.4rem);
+  line-height: 0.95;
+}
+
+.orientation-notice p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.orientation-blocked .phone-shell {
+  filter: blur(6px);
+  opacity: 0.32;
+}
+
+.controller-page::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.92), rgba(104, 216, 255, 0.1) 54%, transparent 72%);
+  opacity: 0;
+}
+
+.controller-page.impact-feedback::after {
+  animation: impact-flash 260ms ease-out;
+}
+
+@keyframes impact-flash {
+  0% {
+    opacity: 0;
+  }
+
+  18% {
+    opacity: 0.82;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
 @media (max-width: 900px) {
   .display-app {
     padding: 14px;
@@ -406,7 +496,10 @@ h1 {
 
   .controller-panel {
     min-height: auto;
+    max-height: calc(100dvh - 24px);
+    align-content: start;
     gap: 12px;
+    overflow: auto;
     padding: 18px;
   }
 
@@ -431,10 +524,6 @@ h1 {
 
   .scene-label-left {
     left: 12px;
-  }
-
-  .scene-label-right {
-    right: 12px;
   }
 
   .scene-label strong {

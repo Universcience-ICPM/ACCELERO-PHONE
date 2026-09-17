@@ -64,7 +64,7 @@ app.get("/api/config", async (req, res, next) => {
       displayUrl,
       controllerUrl,
       qrDataUrl,
-      maxPlayers: 2,
+      maxPlayers: null,
       players: getPlayersSnapshot()
     });
   } catch (error) {
@@ -77,11 +77,9 @@ const server = https.createServer(tls, app);
 const wss = new WebSocketServer({ server });
 
 const displays = new Set();
-const controllers = new Map([
-  [1, null],
-  [2, null]
-]);
+const controllers = new Map();
 let nextClientId = 1;
+let nextPlayerId = 1;
 
 wss.on("connection", (socket, request) => {
   socket.isAlive = true;
@@ -156,6 +154,11 @@ function handleSocketMessage(socket, message) {
     return;
   }
 
+  if (message.type === "haptic") {
+    relayHaptic(socket, message);
+    return;
+  }
+
   send(socket, { type: "error", message: "Type de message inconnu." });
 }
 
@@ -180,16 +183,7 @@ function registerController(socket) {
   }
 
   unregisterSocket(socket);
-  const playerId = findFreePlayerId();
-  if (!playerId) {
-    socket.role = "rejected";
-    send(socket, {
-      type: "session-full",
-      message: "Deux joueurs sont deja connectes."
-    });
-    setTimeout(() => socket.close(1008, "session-full"), 1500);
-    return;
-  }
+  const playerId = nextPlayerId++;
 
   socket.role = "controller";
   socket.playerId = playerId;
@@ -239,6 +233,27 @@ function relayOrientation(socket, message) {
   broadcastDisplays(orientation);
 }
 
+function relayHaptic(socket, message) {
+  if (socket.role !== "display") {
+    return;
+  }
+
+  const playerId = Number(message.playerId);
+  const controller = controllers.get(playerId);
+  if (!controller) {
+    return;
+  }
+
+  send(controller, {
+    type: "haptic",
+    playerId,
+    pattern: sanitizeVibrationPattern(message.pattern),
+    reason: typeof message.reason === "string" ? message.reason.slice(0, 80) : "spider-axis-hit",
+    timestamp: Number.isFinite(message.timestamp) ? Number(message.timestamp) : Date.now(),
+    serverTimestamp: Date.now()
+  });
+}
+
 function unregisterSocket(socket) {
   if (socket.role === "display") {
     displays.delete(socket);
@@ -247,7 +262,7 @@ function unregisterSocket(socket) {
   if (socket.role === "controller" && socket.playerId) {
     const playerId = socket.playerId;
     if (controllers.get(playerId) === socket) {
-      controllers.set(playerId, null);
+      controllers.delete(playerId);
       broadcastDisplays({
         type: "player-status",
         playerId,
@@ -259,15 +274,6 @@ function unregisterSocket(socket) {
 
   socket.role = "closed";
   socket.playerId = null;
-}
-
-function findFreePlayerId() {
-  for (const playerId of [1, 2]) {
-    if (!controllers.get(playerId)) {
-      return playerId;
-    }
-  }
-  return null;
 }
 
 function send(socket, payload) {
@@ -283,19 +289,36 @@ function broadcastDisplays(payload) {
 }
 
 function getPlayersSnapshot() {
-  return [1, 2].map((playerId) => {
-    const socket = controllers.get(playerId);
-    return {
+  return [...controllers.entries()]
+    .sort(([playerA], [playerB]) => playerA - playerB)
+    .map(([playerId, socket]) => ({
       playerId,
       connected: Boolean(socket),
       lastSeen: socket?.lastSeen || null
-    };
-  });
+    }));
 }
 
 function sanitizeNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
+}
+
+function sanitizeVibrationPattern(pattern) {
+  if (!Array.isArray(pattern)) {
+    return [35, 30, 65];
+  }
+
+  const durations = pattern
+    .slice(0, 8)
+    .map((duration) => Math.round(sanitizeNumber(duration)))
+    .map((duration) => Math.min(500, Math.max(0, duration)));
+
+  const total = durations.reduce((sum, duration) => sum + duration, 0);
+  if (durations.length === 0 || total <= 0 || total > 1200) {
+    return [35, 30, 65];
+  }
+
+  return durations;
 }
 
 function loadTlsCredentials() {

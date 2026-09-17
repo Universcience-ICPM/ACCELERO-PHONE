@@ -24,6 +24,9 @@
           <button id="recalibrateButton" class="secondary-button" type="button" disabled>
             RECALIBRER
           </button>
+          <button id="vibrationTestButton" class="secondary-button" type="button">
+            TEST VIBRATION + SON
+          </button>
         </div>
 
         <div class="sensor-readout" aria-live="polite">
@@ -48,10 +51,18 @@
             <span>Écran</span><strong id="debugScreen">--</strong>
             <span>Brut α β γ</span><strong id="debugRaw">--</strong>
             <span>Normalisé α β γ</span><strong id="debugNormalized">--</strong>
+            <span>Retour impact</span><strong id="debugFeedback">--</strong>
+            <span>Portrait</span><strong id="debugOrientationLock">--</strong>
           </div>
         </section>
       </section>
     </main>
+
+    <aside id="portraitNotice" class="orientation-notice" aria-live="polite" hidden>
+      <p class="eyebrow">Orientation</p>
+      <h2>Tournez le téléphone</h2>
+      <p>Cette commande reste lisible et stable en mode portrait.</p>
+    </aside>
 
     <script type="module" src="/js/controller.js"></script>
   </body>
