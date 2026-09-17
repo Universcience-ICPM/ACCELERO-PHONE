@@ -1,7 +1,8 @@
 # Smartphone Cubes
 
 Prototype web local pour transformer des smartphones en controleurs d'une scene
-Three.js affichee sur un Mac.
+Three.js affichee sur un ordinateur. Le serveur fonctionne sous Windows, Linux
+et macOS.
 
 Chaque smartphone qui scanne le QR code rejoint la session. Le serveur attribue
 un identifiant automatiquement, cree un cube pour ce telephone, puis adapte la
@@ -29,13 +30,19 @@ taille et la grille des cubes au nombre de smartphones connectes.
 
 ## Prerequis
 
-- Node.js ;
-- npm ;
-- un Mac qui lance le serveur ;
-- un ou plusieurs smartphones sur le meme Wi-Fi que le Mac.
+- un ordinateur sous Windows, Linux ou macOS pour lancer le serveur ;
+- Node.js et npm ;
+- OpenSSL accessible depuis le terminal avec `openssl version` ;
+- un ou plusieurs smartphones sur le meme reseau Wi-Fi que l'ordinateur.
 
 Pour les capteurs mobiles, HTTPS est indispensable. Le projet genere un
 certificat local auto-signe dans `certs/` si aucun certificat n'existe.
+
+Sous Windows, Node.js peut demander une autorisation dans le pare-feu au
+premier lancement. Autoriser l'acces sur les reseaux prives pour que les
+smartphones puissent joindre le serveur. Si `openssl version` n'est pas
+reconnu dans PowerShell ou l'invite de commandes, installer OpenSSL et l'ajouter
+au `PATH`, ou lancer le projet depuis Git Bash avec OpenSSL disponible.
 
 Sur iPhone, la vibration Web est souvent indisponible, y compris dans Chrome
 iOS car il utilise le moteur WebKit d'iOS. Android Chrome prend mieux en charge
@@ -68,12 +75,13 @@ Le terminal affiche des URLs de ce type :
 
 ```text
 Server running
-Display:    https://ADRESSE_IP_DU_MAC:3000/
-Controller: https://ADRESSE_IP_DU_MAC:3000/controller
+Display:    https://ADRESSE_IP_DU_PC:3000/
+Controller: https://ADRESSE_IP_DU_PC:3000/controller
 ```
 
-Ouvrir l'URL `Display` sur le Mac. Les smartphones scannent le QR code affiche
-ou ouvrent directement l'URL `Controller`.
+Ouvrir l'URL `Display` sur l'ordinateur qui affiche l'experience. Les
+smartphones scannent le QR code affiche ou ouvrent directement l'URL
+`Controller`.
 
 Si le port 3000 est deja utilise, arreter l'autre serveur ou lancer celui-ci sur
 un autre port :
@@ -82,11 +90,25 @@ un autre port :
 PORT=3001 npm start
 ```
 
+La commande ci-dessus convient a macOS, Linux et Git Bash. Dans PowerShell :
+
+```powershell
+$env:PORT=3001
+npm start
+```
+
+Dans l'invite de commandes Windows (`cmd.exe`) :
+
+```bat
+set PORT=3001
+npm start
+```
+
 ## Utilisation
 
 1. Lancer le serveur avec `npm start`.
-2. Ouvrir l'URL `Display` sur le Mac.
-3. Connecter les smartphones au meme Wi-Fi que le Mac.
+2. Ouvrir l'URL `Display` sur l'ordinateur.
+3. Connecter les smartphones au meme Wi-Fi que l'ordinateur.
 4. Scanner le QR code avec chaque smartphone.
 5. Sur chaque telephone, toucher `DEMARRER`.
 6. Autoriser l'acces aux mouvements si le navigateur le demande.
@@ -152,11 +174,11 @@ Option utile sur la page `Display` :
 Ajouter `?debug=1` a l'URL :
 
 ```text
-https://ADRESSE_IP_DU_MAC:3000/?debug=1
-https://ADRESSE_IP_DU_MAC:3000/controller?debug=1
+https://ADRESSE_IP_DU_PC:3000/?debug=1
+https://ADRESSE_IP_DU_PC:3000/controller?debug=1
 ```
 
-La page Mac affiche notamment :
+La page d'affichage principale montre notamment :
 
 - FPS ;
 - nombre de cubes ;
@@ -213,13 +235,16 @@ Le port 3000 est deja pris par un autre processus. Arreter l'autre serveur avec
 PORT=3001 npm start
 ```
 
+Sous Windows, utiliser la syntaxe PowerShell ou `cmd.exe` indiquee dans la
+section `Lancement`.
+
 ### La page est inaccessible sur un smartphone
 
 Verifier d'abord que tous les appareils sont sur le meme Wi-Fi. C'est
 indispensable.
 
-Verifier ensuite l'IP affichee au lancement du serveur. Si le Mac change de
-reseau ou d'adresse IP, arreter le serveur avec `Ctrl+C`, puis relancer :
+Verifier ensuite l'IP affichee au lancement du serveur. Si l'ordinateur change
+de reseau ou d'adresse IP, arreter le serveur avec `Ctrl+C`, puis relancer :
 
 ```bash
 npm start
@@ -238,7 +263,8 @@ Si Safari garde un ancien etat, vider les donnees du site dans :
 Reglages > Apps > Safari > Avance > Donnees de sites
 ```
 
-Chercher puis supprimer l'ancienne adresse IP ou l'adresse actuelle du Mac.
+Chercher puis supprimer l'ancienne adresse IP ou l'adresse actuelle de
+l'ordinateur serveur.
 
 ### Les capteurs ne repondent pas
 
@@ -268,7 +294,7 @@ Chercher puis supprimer l'ancienne adresse IP ou l'adresse actuelle du Mac.
 ### Le QR code pointe vers une ancienne IP
 
 Relancer le serveur. Le certificat et le QR code sont recalcules au demarrage
-selon l'adresse reseau actuelle du Mac.
+selon l'adresse reseau actuelle de l'ordinateur serveur.
 
 ## Structure
 
